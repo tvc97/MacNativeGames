@@ -14,10 +14,13 @@
       woke all 18 waiters, 29,570 and 79 ms instead of 1.3 ms). Then each waiter is released by its own event, one
       waiting on 2 handles by its second, one on 6 (more than the 4 a waiter keeps, so it is woken by every signal) by its
       sixth, and each must return 0 with the right index.
-   Build from games/totk (outside the project for the output):
-     xcrun clang -std=c11 -O1 -g -Wall -Wextra -Werror -Ithird_party/d2r_gfx/gfx/nvn/include tests/system_event_bind/probe.c runtime/threads.c runtime/thread_enter.S -o /tmp/se-bind-probe
-   and with -DGAME_BOTW=1 for Breath of the Wild's handle encoding and virtual cores. Run with no argument for both parts,
-   `decoy` for one destroy / decoy / re-create round, `wake` for part 2 alone. Negative control: threads.c from before
+   3. SignalToAddress with SignalAndModifyByWaitingCountIfEqual writes the value mesosphère does (after nxnative d47f899;
+      KAddressArbiter, Ryujinx and yuzu agree): waking all (count <= 0) with waiters value - 2, with none value + 1; waking
+      count with waiters: value - 1 when all of them fit, value unchanged when some stay. Guest threads wait on the address
+      (WaitIfEqual); every one woken must return 0. Before the fix waking all with waiters wrote value - 1.
+   Build and run from games/totk: make probe-system-event (GAME_BOTW=1 for Breath of the Wild's handle encoding and virtual
+   cores; remove build/system-event-probe when switching). Run with no argument for both parts,
+   `decoy` for one destroy / decoy / re-create round, `wake` for part 2 alone, `arbiter` for part 3 alone. Negative control: threads.c from before
    this change (copied outside the project, built with -Iruntime) stops at the first signal after a destroy (a closed
    write handle), `decoy` reports the decoy signalled (Tears of the Kingdom; Breath of the Wild stops at the stale
    handle), and `wake` reports about 30,000 context switches for Tears of the Kingdom (Breath of the Wild already
@@ -105,10 +108,12 @@ static int decoy_once(void) {
     printf("{\"status\":\"pass\",\"part\":\"decoy\"}\n"); return 0;
 }
 static int wake_part(void);
+static int arbiter_part(void);
 int main(int argc, char **argv) {
     svc_thread_main_init();
     if (argc > 1 && !strcmp(argv[1], "decoy")) return decoy_once();
     if (argc > 1 && !strcmp(argv[1], "wake")) return wake_part();
+    if (argc > 1 && !strcmp(argv[1], "arbiter")) return arbiter_part();
     /* part 1 */
     enum { ROUNDS = 2000 };
     unsigned reused = 0;
@@ -147,7 +152,8 @@ int main(int argc, char **argv) {
     need(atomic_load(&g_host_signals) > 0, "host thread signalled");
     printf("{\"part\":\"bind\",\"rounds\":%u,\"creates\":%u,\"decoy_reused_slots\":%u,\"host_signals\":%lu}\n",
            ROUNDS, rounds_creates, reused, (unsigned long)atomic_load(&g_host_signals));
-    return wake_part();
+    wake_part();
+    return arbiter_part();
 }
 static int wake_part(void) {
     /* part 2 */
@@ -183,5 +189,54 @@ static int wake_part(void) {
     printf("{\"status\":\"%s\",\"part\":\"wake\",\"signals\":%d,\"waiters\":%d,\"context_switches\":%llu,\"signal_ms\":%.1f}\n",
            csw < 1000 ? "pass" : "fail", SIGNALS, NWAIT, (unsigned long long)csw, (t1 - t0) / 1e6);
     if (csw >= 1000) runtime_fail("signals to an object nobody waits on woke waiters");
+    return 0;
+}
+
+/* ---------- part 3: SignalToAddress, SignalAndModifyByWaitingCountIfEqual ---------- */
+typedef struct { _Atomic int32_t *addr; int32_t value; atomic_int entered; atomic_int done; uint64_t res; } AddrWaiter;
+static void addr_waiter_main(uint64_t arg) {
+    AddrWaiter *w = (AddrWaiter *)(uintptr_t)arg; uint64_t r[31] = {0};
+    atomic_store(&w->entered, 1);
+    r[0] = (uintptr_t)w->addr; r[1] = 2; r[2] = (uint64_t)(uint32_t)w->value; r[3] = (uint64_t)-1; kernel(0x34, r);   /* WaitIfEqual, no timeout */
+    w->res = r[0]; atomic_store(&w->done, 1);
+    kernel(0x0a, r); runtime_fail("ExitThread returned");
+}
+/* nwait guest threads wait on a fresh address holding 100; SignalToAddress(type 2, 100, count) must write want and wake
+   min(count, nwait) of them (all for count <= 0); the rest are released by a plain signal afterwards. */
+static void arbiter_case(int nwait, int count, int32_t want) {
+    static _Atomic int32_t words[16]; static int next; _Atomic int32_t *addr = &words[next++]; atomic_store(addr, 100);
+    AddrWaiter w[4]; memset(w, 0, sizeof w); uint32_t th[4];
+    for (int k = 0; k < nwait; k++) {
+        w[k].addr = addr; w[k].value = 100;
+        uint8_t *stack = mmap(NULL, 1 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0); need(stack != MAP_FAILED, "guest stack");
+        uint64_t r[31] = {0}; r[1] = (uintptr_t)addr_waiter_main; r[2] = (uintptr_t)&w[k]; r[3] = (uintptr_t)stack + (1 << 20); r[4] = 44; r[5] = -1;
+#ifdef GAME_BOTW
+        r[5] = (uint64_t)(1 + k % 2);   /* as in part 2: the main thread keeps core 0 */
+#endif
+        kernel(8, r); need(!r[0], "CreateThread"); th[k] = (uint32_t)r[1];
+        r[0] = th[k]; kernel(9, r); need(!r[0], "StartThread");
+    }
+    for (int k = 0; k < nwait; k++) while (!atomic_load(&w[k].entered)) usleep(1000);
+    usleep(100000);   /* all in WaitForAddress */
+    uint64_t r[31] = {0}; r[0] = (uintptr_t)addr; r[1] = 2; r[2] = 100; r[3] = (uint64_t)(uint32_t)count; kernel(0x35, r);
+    need(!r[0], "SignalToAddress");
+    int32_t got = atomic_load(addr);
+    if (got != want) { fprintf(stderr, "SignalToAddress type 2, %d waiter(s), count %d: value %d, want %d\n", nwait, count, got, want); runtime_fail("SignalAndModifyByWaitingCountIfEqual value"); }
+    int woken = count <= 0 || count >= nwait ? nwait : count;
+    usleep(100000);
+    int done = 0; for (int k = 0; k < nwait; k++) done += atomic_load(&w[k].done);
+    need(done == woken, "SignalToAddress woke the expected number of waiters");
+    if (woken < nwait) { r[0] = (uintptr_t)addr; r[1] = 0; r[2] = 0; r[3] = (uint64_t)-1; kernel(0x35, r); need(!r[0], "release the rest"); }
+    for (int k = 0; k < nwait; k++) {
+        r[0] = 0; r[1] = (uintptr_t)&th[k]; r[2] = 1; r[3] = 2000000000; kernel(0x18, r); need(!r[0], "address waiter exited");
+        need(w[k].res == 0, "a woken address waiter returns 0");
+    }
+}
+static int arbiter_part(void) {
+    arbiter_case(2, -1, 98);   /* waking all with waiters: value - 2 */
+    arbiter_case(0, -1, 101);  /* waking all, nobody waiting: value + 1 */
+    arbiter_case(2, 2, 99);    /* waking count, all fit: value - 1 */
+    arbiter_case(3, 1, 100);   /* waking count, some stay: unchanged */
+    printf("{\"status\":\"pass\",\"part\":\"arbiter\",\"cases\":4}\n");
     return 0;
 }

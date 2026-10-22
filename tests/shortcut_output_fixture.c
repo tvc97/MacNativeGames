@@ -45,3 +45,12 @@ int shortcut_test_scene_init(void) {
 #else
 int shortcut_test_scene_init(void) { return 0; }
 #endif
+/* Key 4 as runtime/aspect_patch.h runs it (the production cycle), with a synthetic data-page slot and a window of
+   ratio view instead of the stubs aspect_install writes into the game. */
+void shortcut_test_aspect_init(double view) {
+    static _Atomic(uint32_t) slot;
+    g_aspect_wide = (float)ASPECT_WIDE;
+    atomic_store(&g_aspect_step, ASPECT_STEP_GAME);
+    g_aspect_slot = &slot;
+    runtime_aspect_view(view * 1080, 1080);
+}

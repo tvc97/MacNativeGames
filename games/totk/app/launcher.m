@@ -242,7 +242,7 @@ int main(int argc, char **argv) {
         /* GPU memory budget (nvn_mtl.m gpu_budget_check): 40% of memory, at least the former fixed 5000 MB. Native 2K renders
            the scene at 1440p and measured 4.2 GB allocated in one field scene (2026-10-19), too close to 5000. */
         { unsigned long long mb = NSProcessInfo.processInfo.physicalMemory / 5 * 2 >> 20; char budget[32];
-          snprintf(budget, sizeof budget, "%llu", mb < 5000 ? 5000ULL : mb); setenv("TOTK_GPU_BUDGET_MB", budget, 1); }
+          snprintf(budget, sizeof budget, "%llu", mb < 5000 ? 5000ULL : mb); setenv("TOTK_GPU_BUDGET_MB", budget, 0); }   // an explicit TOTK_GPU_BUDGET_MB from the environment still wins (upstream PR #198)
         setenv("TOTK_SLOT_OWNER", "user", 0);
         setenv("TOTK_SLOT_PURPOSE", "player", 0);
         NSString *contrib = env_or("TOTK_SHADER_CONTRIB", [data stringByAppendingPathComponent:@"shader-list-contribution.txt"]);
