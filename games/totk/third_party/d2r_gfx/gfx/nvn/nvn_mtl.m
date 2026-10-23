@@ -16085,7 +16085,12 @@ void botw_serial_note(uint64_t serial, const char *what) {
 #define WB_STAGE_MAX (256u << 10)   /* larger textures keep the read-back blit at the invalidate */
 static uint64_t g_wb_sub[64]; static int g_wb_nsub;   /* submit thread: serials noted in this submission */
 static uint64_t g_wb_staged, g_wb_from_stage;
+static int wb_stage_on(void) {   /* TOTK_WB_STAGE=0: every write-back reads the texture back as before the staging */
+    static int v = -1; if (v < 0) { const char *e = getenv("TOTK_WB_STAGE"); v = !(e && !strcmp(e, "0")); if (!v) MLOG("TOTK_WB_STAGE=0: write-backs read the texture back, no stage copies"); }
+    return v;
+}
 void botw_wb_sub_note(uint64_t k) {
+    if (!wb_stage_on()) return;
     for (int i = 0; i < g_wb_nsub; i++) if (g_wb_sub[i] == k) return;
     if (g_wb_nsub < 64) g_wb_sub[g_wb_nsub++] = k;
 }
