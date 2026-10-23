@@ -45,6 +45,12 @@ frames all through the run), so it is not proven to be the cause. Next step: dum
 load and after a teleport at the same spot and compare them. The code involved (`botw_tex_follow`, the write-back
 staging) is upstream's, so upstream most likely shows the same bug.
 
+## Default render size
+
+This fork renders docked play at the shipped 1600x900 by default (`TOTK_RENDER_RES=1080` for native 1080p, the
+earlier default): the water under the stable's bridge was missing only with 1080p. Water without collision after a
+load happens at both sizes.
+
 ## Diagnostic switch
 
 `TOTK_WB_STAGE=0` (BotW, `nvn_mtl.m`): write-backs read the texture back as before the staging and nothing is copied

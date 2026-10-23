@@ -494,8 +494,9 @@ static unsigned excl_acquire(uint8_t *code, size_t n) {
     }
     return done;
 }
-/* Docked render size (TOTK_RENDER_RES=900: as shipped). The display-mode routine (main+0x1821644, run when the operation
-   mode is set, before the render targets are made) stores the screen width 1920.0 and the render width 1600.0 as one
+/* Docked render size (TOTK_RENDER_RES=1080: native 1080p). This fork's default is 1600x900 as shipped: with the
+   1080p size, water was not drawn under the bridge by Riverside Stable (docs/botw-160-water-collision.md). The
+   display-mode routine (main+0x1821644, run when the operation mode is set, before the render targets are made) stores the screen width 1920.0 and the render width 1600.0 as one
    pair (+0x1290 / +0x1294 of the graphics system); the renderer scales its targets by render / screen width, so docked
    play draws the scene at 1600x900 and upscales it into the 1920x1080 canvas. 1920.0 makes it native 1080p: every scene
    target is made at 1920x1080 (and 960x540 for the half-size ones; pass dumps 2026-10-20) at the same frame rate on the
@@ -513,7 +514,7 @@ enum { RENDER_MOVK = 0x12660c8 };
 static int g_render_1080;
 static void patch_render_1080(Module *m) {
     const char *e = getenv("TOTK_RENDER_RES");
-    if (e && !strcmp(e, "900")) { fprintf(stderr, "[botw] docked render size 1600x900, as shipped (TOTK_RENDER_RES=900)\n"); return; }
+    if (!e || strcmp(e, "1080")) { fprintf(stderr, "[botw] docked render size 1600x900, as shipped (TOTK_RENDER_RES=1080: native 1080p)\n"); return; }
     static const struct { uint32_t off, original; } check[] = {
 #ifdef GAME_BOTW160
         {0x1821670u, 0xd2a89e08u}, {0x1821674u, 0xf2e89908u}, {0x1821678u, 0xf9094b88u},
@@ -532,7 +533,7 @@ static void patch_render_1080(Module *m) {
     const uint32_t movk = 0xf2e89e08u;   /* movk x8, #0x44f0, lsl #48 */
     memcpy(m->base + RENDER_MOVK, &movk, 4);
     g_render_1080 = 1;
-    fprintf(stderr, "[botw] docked render size 1920x1080 (shipped: 1600x900; TOTK_RENDER_RES=900 keeps it)\n");
+    fprintf(stderr, "[botw] docked render size 1920x1080 (TOTK_RENDER_RES=1080; shipped and default: 1600x900)\n");
 }
 void runtime_game_patches(Module *m) {
     fprintf(stderr, "[botw] %s game-code patches\n", TOTK_GAME_VERSION);
