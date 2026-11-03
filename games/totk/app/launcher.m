@@ -368,6 +368,7 @@ int main(int argc, char **argv) {
         setenv("TOTK_SHADER_CACHE", cache.fileSystemRepresentation, 1);
         setenv("TOTK_GAME_SLOT_DIR", slot.fileSystemRepresentation, 1);
         setenv("TOTK_ROMFS_PROOF_DIR", data.fileSystemRepresentation, 1);   // the app bundle stays read-only
+        setenv("TOTK_CHEATS_DIR", env_or("TOTK_CHEATS_DIR", [data stringByAppendingPathComponent:@"cheats"]).fileSystemRepresentation, 1);   // runtime/cheats.c: <build id>.txt
         /* build_app.py --mac-game-data library: the app carries no RomFS image, so a new build is a few hundred MB and
            copies to another Mac without it. It is looked for in the folder chosen at an earlier start (game_data_ask), the
            folder the build put it in (Info.plist MNGGameDataFolder, e.g. on another disk), and <data>/GameData; with none
